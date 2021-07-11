@@ -1,11 +1,10 @@
 import json
 import traceback
-import requests
 
+import requests
 from selenium import webdriver
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 PASSWORD = 'wordpass12'
 
@@ -44,7 +43,7 @@ def wait_for_confirmation() -> str:
     """Waits for a confirmation email and returns its code"""
     switch(2)
     print('waiting for confirmation email')
-    element = WebDriverWait(driver, 20).until(
+    element = WebDriverWait(driver, 30).until(
         EC.presence_of_element_located(('xpath', '//*[@id="tm-body"]/main/div[1]/div/div[2]/div[2]/div/div[1]/div/div[4]/ul/li[2]/div[2]/span/a'))
     )
     text = element.get_attribute('textContent')
@@ -55,8 +54,9 @@ def wait_for_confirmation() -> str:
 def fill_out_register_form(email: str, password: str) -> None:
     """Fills out the registration form"""
     switch(0)
+    driver.get('https://account.mihoyo.com/#/register/email')
     # fill out form
-    print('filling out registration form')
+    print(f'filling out registration form for {email}')
     driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[2]/form/div[1]/div/input').send_keys(email)
     driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[2]/form/div[3]/div/input').send_keys(password)
     driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[2]/form/div[4]/div/input').send_keys(password)
@@ -71,7 +71,9 @@ def fill_out_register_form(email: str, password: str) -> None:
     code = wait_for_confirmation()
     switch(0)
     driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[2]/form/div[2]/div/input').send_keys(code)
-    driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[2]/form/div[6]/button').click()
+    for _ in range(5): # just click it a few times to be sure, idk wtf is going on with mihoyo
+        driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[2]/form/div[6]/button').click()
+        driver.implicitly_wait(.2)
     driver.refresh() # clear out the fields
     print(f'registered email: {email} password: {password} code: {code}')
 
@@ -84,6 +86,8 @@ def register_account() -> tuple[str, str]:
 
 def login(email: str, password: str) -> None:
     """Logs into a mihoyo account, returns the cookies"""
+    if driver.get_cookie('login_ticket') is not None:
+        return # already logged in
     switch(1)
     print('logging in')
     driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[2]/form/div[1]/div/input').send_keys(email)
@@ -98,44 +102,37 @@ def logout():
     """Logs out of a mihoyo acccount"""
     print('logging out of account')
     switch(1)
-    # logout is out of bounds every time
-    size, pos = driver.get_window_size(), driver.get_window_position()
-    
-    driver.maximize_window()
-    ActionChains(driver).move_to_element(
-        driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[1]/div/div/div[1]')
-    ).perform()
-    driver.find_element_by_xpath('//*[@id="root"]/div[1]/div[1]/div/div/div[1]/ul/li').click()
-    
-    driver.set_window_size(**size)
-    driver.set_window_position(**pos)
+    driver.delete_all_cookies()
+    driver.get('https://account.mihoyo.com/#/login')
 
 def get_cookies() -> dict[str, str]:
     """Returns a list of old-style """
-    print('fetching ltuid and ltoken cookies')
+    print('fetching login cookies')
     login_ticket = driver.get_cookie('login_ticket')['value'] # type: ignore
     r = requests.get(f"https://webapi-os.account.mihoyo.com/Api/cookie_accountinfo_by_loginticket?login_ticket={login_ticket}")
     return dict(r.cookies)
 
-accounts = []
-try:
-    while True:
-        print('='*50)
-        email, password = register_account()
-        login(email, password)
-        accounts.append({
-            'email': email,
-            'password': password,
-            'cookies': get_cookies()
-        })
-        # reset
-        logout()
-        driver.delete_all_cookies()
 
-except Exception as e:
-    traceback.print_exc()
-
-finally:
+def run() -> list[dict]:
+    accounts = []
+    try:
+        while True:
+            print('='*50)
+            email, password = register_account()
+            login(email, password)
+            accounts.append({
+                'email': email,
+                'password': password,
+                'cookies': get_cookies()
+            })
+            logout()
+    except Exception as e:
+        traceback.print_exc()
+    finally:
+        return accounts
+    
+if __name__ == '__main__':
+    accounts = run()
     with open('accounts.json', 'r') as file:
         data = json.load(file)
     data.extend(accounts)

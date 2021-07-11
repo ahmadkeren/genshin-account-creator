@@ -1,6 +1,8 @@
 # genshin account creator
 A batch genshin account creator using selenium
 
+All captchas must be solved by the user, there is a 60 second timeout if you take too long.
+
 # how it works
 1. Create a [temp-mail](https://temp-mail.org/) address
 2. Register through the [official website](https://account.mihoyo.com/#/register/email)
