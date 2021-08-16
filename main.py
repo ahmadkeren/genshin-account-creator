@@ -1,19 +1,20 @@
 import argparse
+import hashlib
 import json
 import random
 import string
 import time
-import random
-import argparse
 import traceback
 from typing import Any, Collection
 
+import requests
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-o', '--output', metavar="PATH", default="accounts.json", help="The output json file")
+parser.add_argument('--amount', type=int, metavar="INT", help="The amount of accounts to create")
 parser.add_argument('--password', help="The pasword for all accounts, if not provided will be made randomly")
 parser.add_argument('--cookies', action='store_true', help="Only outputs a list of cookies instead of entire accounts")
 args = parser.parse_args()
@@ -120,7 +121,8 @@ def register(email: str, password: str) -> None:
         login(email, password)
 
 def create_hoyolab_account(email: str, password: str) -> str:
-    """Creates a hoyolab account on the hoyolab website, returns the username"""
+    """Creates a hoyolab account on the hoyolab website, returns the username and cookies"""
+    driver.refresh() # since we cannot refresh after registering the account we gotta do it now
     print('creating a hoyolab account')
     switch_window(1)
     # wait until reloaded
@@ -141,7 +143,6 @@ def create_hoyolab_account(email: str, password: str) -> str:
     driver.find_element_by_xpath('//*[@id="__layout"]/div/div[4]/div/div[2]/div[2]/div[3]/button').click()
     # there used to be a bug where you would get a tos agreement form twice
     
-    driver.refresh() # clear out the fields
     return username
 
 def login(email: str, password: str) -> None:
@@ -192,6 +193,29 @@ def get_cookies(url: str = "https://api-os-takumi.mihoyo.com/", allowed: Collect
     
     return cookies
 
+def _generate_ds_token(salt: str = "6cqshh5dhw73bzxn20oexa9k516chk7s") -> str:
+    t = int(time.time())
+    r = ''.join(random.choices(string.ascii_letters, k=6))
+    h = hashlib.md5(f"salt={salt}&t={t}&r={r}".encode()).hexdigest()
+    return f'{t},{r},{h}'
+
+def verify_cookies(cookies: dict[str, str]):
+    print(f"testing cookies: {cookies}")
+    headers = {
+        "x-rpc-app_version": "1.5.0",
+        "x-rpc-client_type": "4",
+        "x-rpc-language": "en-us",
+        "ds": _generate_ds_token()
+    }
+    
+    # random user I picked
+    r = requests.get("https://api-os-takumi.mihoyo.com/game_record/genshin/api/index?server=os_euro&role_id=707818186", cookies=cookies, headers=headers)
+    data = r.json()
+    if data['retcode'] != 0:
+        return False
+    
+    return True
+
 def clear_cookies() -> None:
     """Deletes cookies from all windows"""
     for handle in driver.window_handles:
@@ -203,11 +227,16 @@ def run() -> list[dict[str, Any]]:
     init_windows()
     accounts = []
     try:
-        while True:
+        while args.amount is None or len(accounts) < args.amount:
             print('='*50)
             email, password = create_account(args.password)
+            # keep making hoyolab account until it works
             username = create_hoyolab_account(email, password)
             cookies = get_cookies()
+            
+            if not verify_cookies(cookies):
+                print("Cookies have not been created properly, skipping account")
+                continue
             
             if args.cookies:
                 accounts.append(cookies)
